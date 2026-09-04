@@ -13,55 +13,55 @@ on:
 
   workflow_dispatch:
 
+
+# ==============================================================
+# BUILD
+# ==============================================================
+
 jobs:
 
-  # ============================================================
-  # BUILD BELDEX DAEMON
-  # ============================================================
   build:
     name: Build Beldex Daemon
-
-    # Ubuntu 20.04 is retired.
-    # Ubuntu 22.04 is suitable for the older GCC 9 toolchain.
     runs-on: ubuntu-22.04
 
     env:
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       # Compiler
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       CC: gcc-9
       CXX: g++-9
 
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       # Boost
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       BOOST_VERSION: 1_83_0
       BOOST_VERSION_DOT: 1.83.0
       BOOST_HASH: 6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e
 
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       # libsodium
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       SODIUM_VERSION: 1.0.18-RELEASE
       SODIUM_HASH: 940ef42797baa0278df6b7fd9e67c7590f87744b
 
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       # SQLite
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       SQLITE_VERSION: 3310100
       SQLITE_HASH: 62284efebc05a76f909c580ffa5c008a7d22a1287285d68b7825a2b6b51949ae
 
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       # curl
-      # --------------------------------------------------------
+      # ----------------------------------------------------------
       CURL_VERSION: 7.76.1
 
 
     steps:
 
-      # ========================================================
-      # 1. CHECKOUT SOURCE
-      # ========================================================
+      # ==========================================================
+      # 1. CHECKOUT
+      # ==========================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -69,64 +69,29 @@ jobs:
           fetch-depth: 0
 
 
-      # ========================================================
-      # 2. SHOW BUILD ENVIRONMENT
-      # ========================================================
-      - name: Show build environment
-        run: |
-          set -eux
+      # ==========================================================
+      # 2. INSTALL SYSTEM DEPENDENCIES
+      # ==========================================================
 
-          echo "========================================"
-          echo "Operating System"
-          echo "========================================"
-          cat /etc/os-release
-
-          echo
-          echo "========================================"
-          echo "Compiler"
-          echo "========================================"
-          gcc-9 --version
-          g++-9 --version
-
-          echo
-          echo "========================================"
-          echo "CMake"
-          echo "========================================"
-          cmake --version
-
-          echo
-          echo "========================================"
-          echo "CPU"
-          echo "========================================"
-          nproc
-
-
-      # ========================================================
-      # 3. INSTALL BUILD DEPENDENCIES
-      # ========================================================
       - name: Install build dependencies
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           sudo apt-get update
 
-          # Make sure Ubuntu Universe is enabled.
-          sudo add-apt-repository -y universe
-
-          sudo apt-get update
-
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            bash \
-            build-essential \
+          sudo apt-get install -y \
+            software-properties-common \
             ca-certificates \
+            build-essential \
+            gcc-9 \
+            g++-9 \
+            cmake \
             curl \
             wget \
             git \
-            cmake \
             pkg-config \
             make \
-            gcc-9 \
-            g++-9 \
             graphviz \
             doxygen \
             libtool-bin \
@@ -135,21 +100,47 @@ jobs:
             bzip2 \
             xsltproc \
             gperf \
-            software-properties-common \
             libsystemd-dev
 
           echo
-          echo "Installed compiler:"
+          echo "========================================"
+          echo "Compiler packages"
+          echo "========================================"
+
+          dpkg -l gcc-9
+          dpkg -l g++-9
+
+          echo
+          echo "========================================"
+          echo "Compiler paths"
+          echo "========================================"
+
+          command -v gcc-9
+          command -v g++-9
+
+          echo
+          echo "========================================"
+          echo "GCC 9"
+          echo "========================================"
+
           gcc-9 --version
+
+          echo
+          echo "========================================"
+          echo "G++ 9"
+          echo "========================================"
+
           g++-9 --version
 
 
-      # ========================================================
-      # 4. SET GCC 9 AS DEFAULT COMPILER
-      # ========================================================
+      # ==========================================================
+      # 3. MAKE GCC 9 DEFAULT
+      # ==========================================================
+
       - name: Configure GCC 9
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           sudo update-alternatives \
             --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
@@ -169,12 +160,52 @@ jobs:
           g++ --version
 
 
-      # ========================================================
-      # 5. PREPARE SOURCE DIRECTORY
-      # ========================================================
-      - name: Prepare source directory
+      # ==========================================================
+      # 4. SHOW BUILD ENVIRONMENT
+      # ==========================================================
+
+      - name: Show build environment
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
+
+          echo "========================================"
+          echo "Operating System"
+          echo "========================================"
+
+          cat /etc/os-release
+
+          echo
+          echo "========================================"
+          echo "Compiler"
+          echo "========================================"
+
+          gcc --version
+          g++ --version
+
+          echo
+          echo "========================================"
+          echo "CMake"
+          echo "========================================"
+
+          cmake --version
+
+          echo
+          echo "========================================"
+          echo "CPU"
+          echo "========================================"
+
+          nproc
+
+
+      # ==========================================================
+      # 5. PREPARE SOURCE DIRECTORY
+      # ==========================================================
+
+      - name: Prepare source directory
+        shell: bash
+        run: |
+          set -euxo pipefail
 
           sudo mkdir -p /usr/local/src
           sudo chown -R "$USER:$USER" /usr/local/src
@@ -182,19 +213,21 @@ jobs:
           ls -ld /usr/local/src
 
 
-      # ========================================================
-      # 6. BUILD BOOST 1.83.0
-      # ========================================================
+      # ==========================================================
+      # 6. BUILD BOOST
+      # ==========================================================
+
       - name: Build Boost
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           cd /usr/local/src
 
           rm -rf "boost_${BOOST_VERSION}"
           rm -f "boost_${BOOST_VERSION}.tar.bz2"
 
-          curl -L \
+          curl -fL \
             -o "boost_${BOOST_VERSION}.tar.bz2" \
             "https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2"
 
@@ -208,13 +241,7 @@ jobs:
 
           cd "boost_${BOOST_VERSION}"
 
-          echo
-          echo "Bootstrapping Boost..."
-
           ./bootstrap.sh
-
-          echo
-          echo "Building Boost..."
 
           sudo ./b2 \
             --prefix=/usr \
@@ -240,12 +267,14 @@ jobs:
           sudo ldconfig
 
 
-      # ========================================================
+      # ==========================================================
       # 7. BUILD LIBSODIUM
-      # ========================================================
+      # ==========================================================
+
       - name: Build libsodium
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           cd /usr/local/src
 
@@ -259,20 +288,13 @@ jobs:
 
           cd libsodium
 
-          echo
-          echo "Checking libsodium commit..."
+          echo "Checking libsodium revision..."
 
           test "$(git rev-parse HEAD)" = "${SODIUM_HASH}"
 
-          echo "libsodium commit verified."
-
-          echo
-          echo "Running autogen.sh..."
+          echo "libsodium revision verified."
 
           ./autogen.sh
-
-          echo
-          echo "Updating config.guess/config.sub..."
 
           CONFIG_GUESS="$(find /usr/share -name config.guess | head -n 1)"
           CONFIG_SUB="$(find /usr/share -name config.sub | head -n 1)"
@@ -287,45 +309,35 @@ jobs:
             build-aux/config.guess \
             build-aux/config.sub
 
-          echo
-          echo "Configuring libsodium..."
-
           ./configure \
             --enable-static \
             --disable-shared \
             --prefix=/usr
 
-          echo
-          echo "Building libsodium..."
-
           make -j"$(nproc)"
 
-          echo
-          echo "Running libsodium tests..."
-
           make check
-
-          echo
-          echo "Installing libsodium..."
 
           sudo make install
 
           sudo ldconfig
 
 
-      # ========================================================
+      # ==========================================================
       # 8. BUILD SQLITE
-      # ========================================================
+      # ==========================================================
+
       - name: Build SQLite
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           cd /usr/local/src
 
-          rm -f "sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
           rm -rf "sqlite-autoconf-${SQLITE_VERSION}"
+          rm -f "sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
 
-          curl -L \
+          curl -fL \
             -o "sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
             "https://sqlite.org/2020/sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
 
@@ -339,40 +351,33 @@ jobs:
 
           cd "sqlite-autoconf-${SQLITE_VERSION}"
 
-          echo
-          echo "Configuring SQLite..."
-
           ./configure \
             --disable-shared \
             --prefix=/usr \
             --with-pic
 
-          echo
-          echo "Building SQLite..."
-
           make -j"$(nproc)"
-
-          echo
-          echo "Installing SQLite..."
 
           sudo make install
 
           sudo ldconfig
 
 
-      # ========================================================
-      # 9. BUILD CURL 7.76.1
-      # ========================================================
+      # ==========================================================
+      # 9. BUILD CURL
+      # ==========================================================
+
       - name: Build curl
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           cd /usr/local/src
 
-          rm -f "curl-${CURL_VERSION}.tar.gz"
           rm -rf "curl-${CURL_VERSION}"
+          rm -f "curl-${CURL_VERSION}.tar.gz"
 
-          curl -L \
+          curl -fL \
             -o "curl-${CURL_VERSION}.tar.gz" \
             "https://curl.se/download/curl-${CURL_VERSION}.tar.gz"
 
@@ -380,21 +385,12 @@ jobs:
 
           cd "curl-${CURL_VERSION}"
 
-          echo
-          echo "Configuring curl..."
-
           ./configure \
             --enable-static \
             --disable-shared \
             --prefix=/usr/local
 
-          echo
-          echo "Building curl..."
-
           make -j"$(nproc)"
-
-          echo
-          echo "Installing curl..."
 
           sudo make install
 
@@ -402,29 +398,32 @@ jobs:
 
           echo
           echo "Installed curl:"
-          /usr/local/bin/curl --version || true
+          /usr/local/bin/curl --version
 
 
-      # ========================================================
+      # ==========================================================
       # 10. UPDATE SUBMODULES
-      # ========================================================
+      # ==========================================================
+
       - name: Update git submodules
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           git submodule sync --recursive
           git submodule update --init --recursive
 
 
-      # ========================================================
+      # ==========================================================
       # 11. APPLY SOURCE COMPATIBILITY FIXES
-      # ========================================================
+      # ==========================================================
+
       - name: Apply source compatibility fixes
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
-          echo "Applying loki-mq/oxenc fixes..."
-
+          # loki-mq / oxenc compatibility
           sed -i \
             's/add_library(_oxenmq_external_oxenc INTERFACE IMPORTED)//' \
             external/loki-mq/CMakeLists.txt
@@ -437,22 +436,20 @@ jobs:
             's/target_link_libraries(oxenmq PUBLIC _oxenmq_external_oxenc)/target_link_libraries(oxenmq PUBLIC oxenc::oxenc)/' \
             external/loki-mq/CMakeLists.txt
 
-          echo "Applying Catch2 build fix..."
-
+          # Catch2 is not needed when tests are disabled.
           sed -i \
             's/add_subdirectory(Catch2)/if(BUILD_TESTS)\n  add_subdirectory(Catch2)\nendif()/' \
             external/CMakeLists.txt
 
-          echo
-          echo "Source compatibility fixes applied."
 
-
-      # ========================================================
+      # ==========================================================
       # 12. CONFIGURE CMAKE
-      # ========================================================
+      # ==========================================================
+
       - name: Configure CMake
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           rm -rf build/release
 
@@ -460,8 +457,11 @@ jobs:
 
           cd build/release
 
-          echo "Using compiler:"
+          echo "C compiler:"
           "${CC}" --version
+
+          echo
+          echo "C++ compiler:"
           "${CXX}" --version
 
           echo
@@ -473,67 +473,74 @@ jobs:
             -DSTATIC=ON \
             -DARCH=x86-64 \
             -DHTTPS_AND_SSL=OFF \
+            -DBUILD_TESTS=OFF \
             -DCMAKE_BUILD_TYPE=Release \
             ../..
 
 
-      # ========================================================
-      # 13. BUILD BELDEX DAEMON
-      # ========================================================
+      # ==========================================================
+      # 13. BUILD BELDEX
+      # ==========================================================
+
       - name: Build Beldex
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           cd build/release
-
-          echo "Starting Beldex build..."
 
           make \
             -j"$(nproc)" \
             VERBOSE=1
 
 
-      # ========================================================
+      # ==========================================================
       # 14. VERIFY BELDEXD
-      # ========================================================
+      # ==========================================================
+
       - name: Verify beldexd
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
+
+          test -f build/release/bin/beldexd
 
           echo "========================================"
-          echo "Build output"
+          echo "Beldex binary"
           echo "========================================"
 
-          ls -lah build/release/bin/
+          ls -lh build/release/bin/beldexd
 
           echo
           echo "========================================"
-          echo "Binary information"
+          echo "File information"
           echo "========================================"
 
           file build/release/bin/beldexd
 
           echo
           echo "========================================"
-          echo "Dynamic dependencies"
+          echo "Dependencies"
           echo "========================================"
 
           ldd build/release/bin/beldexd || true
 
           echo
           echo "========================================"
-          echo "Beldex version"
+          echo "Version"
           echo "========================================"
 
           build/release/bin/beldexd --version || true
 
 
-      # ========================================================
+      # ==========================================================
       # 15. PREPARE ARTIFACT
-      # ========================================================
+      # ==========================================================
+
       - name: Prepare artifacts
+        shell: bash
         run: |
-          set -eux
+          set -euxo pipefail
 
           rm -rf artifacts
 
@@ -541,7 +548,6 @@ jobs:
 
           cp -a build/release/bin/. artifacts/
 
-          echo
           echo "Artifact contents:"
           ls -lah artifacts/
 
@@ -550,13 +556,14 @@ jobs:
             -C artifacts .
 
           echo
-          echo "Final archive:"
+          echo "Archive:"
           ls -lh beldex-daemon-linux-x86_64.tar.gz
 
 
-      # ========================================================
-      # 16. UPLOAD BUILD ARTIFACT
-      # ========================================================
+      # ==========================================================
+      # 16. UPLOAD ARTIFACT
+      # ==========================================================
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -567,27 +574,28 @@ jobs:
           retention-days: 30
 
 
-  # ============================================================
-  # DEPLOYMENT
-  # ============================================================
+  # ==============================================================
+  # DEPLOY
+  # ==============================================================
+
   deploy:
     name: Upload binary to server
 
     needs:
       - build
 
-    # Deploy only after a successful build from a push to main.
     if: >
-      github.ref == 'refs/heads/main' &&
-      github.event_name == 'push'
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
 
     runs-on: ubuntu-22.04
 
     steps:
 
-      # ========================================================
-      # 17. DOWNLOAD BUILD ARTIFACT
-      # ========================================================
+      # ==========================================================
+      # 17. DOWNLOAD ARTIFACT
+      # ==========================================================
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
@@ -595,27 +603,30 @@ jobs:
           path: ./artifact
 
 
-      # ========================================================
+      # ==========================================================
       # 18. SHOW ARTIFACT
-      # ========================================================
-      - name: Show downloaded artifact
-        run: |
-          set -eux
+      # ==========================================================
 
-          echo "Downloaded files:"
+      - name: Show downloaded artifact
+        shell: bash
+        run: |
+          set -euxo pipefail
+
           find ./artifact -maxdepth 3 -type f -ls
 
 
-      # ========================================================
+      # ==========================================================
       # 19. CONFIGURE SSH
-      # ========================================================
+      # ==========================================================
+
       - name: Configure SSH
+        shell: bash
         env:
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
         run: |
-          set -eux
+          set -euxo pipefail
 
           mkdir -p ~/.ssh
 
@@ -631,17 +642,19 @@ jobs:
           chmod 644 ~/.ssh/known_hosts
 
 
-      # ========================================================
+      # ==========================================================
       # 20. UPLOAD BINARY
-      # ========================================================
+      # ==========================================================
+
       - name: Upload binary
+        shell: bash
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          set -eux
+          set -euxo pipefail
 
           scp \
             -P "${SERVER_PORT}" \
@@ -649,17 +662,19 @@ jobs:
             "${SERVER_USER}@${SERVER_HOST}:${DEPLOY_PATH}/"
 
 
-      # ========================================================
+      # ==========================================================
       # 21. VERIFY UPLOAD
-      # ========================================================
+      # ==========================================================
+
       - name: Verify upload
+        shell: bash
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          set -eux
+          set -euxo pipefail
 
           ssh \
             -p "${SERVER_PORT}" \
