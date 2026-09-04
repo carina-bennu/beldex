@@ -2,77 +2,52 @@ name: Beldex Daemon Build
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
 
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [main, master]
 
   workflow_dispatch:
 
-
-# ==============================================================
-# BUILD
-# ==============================================================
-
 jobs:
 
+  # ============================================================
+  # BUILD JOB
+  # ============================================================
   build:
     name: Build Beldex Daemon
     runs-on: ubuntu-22.04
 
     env:
-      # ----------------------------------------------------------
-      # Compiler
-      # ----------------------------------------------------------
       CC: gcc-9
       CXX: g++-9
 
-      # ----------------------------------------------------------
-      # Boost
-      # ----------------------------------------------------------
       BOOST_VERSION: 1_83_0
       BOOST_VERSION_DOT: 1.83.0
       BOOST_HASH: 6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e
 
-      # ----------------------------------------------------------
-      # libsodium
-      # ----------------------------------------------------------
       SODIUM_VERSION: 1.0.18-RELEASE
       SODIUM_HASH: 940ef42797baa0278df6b7fd9e67c7590f87744b
 
-      # ----------------------------------------------------------
-      # SQLite
-      # ----------------------------------------------------------
       SQLITE_VERSION: 3310100
       SQLITE_HASH: 62284efebc05a76f909c580ffa5c008a7d22a1287285d68b7825a2b6b51949ae
 
-      # ----------------------------------------------------------
-      # curl
-      # ----------------------------------------------------------
       CURL_VERSION: 7.76.1
-
 
     steps:
 
-      # ==========================================================
-      # 1. CHECKOUT
-      # ==========================================================
-
-      - name: Checkout repository
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-
-      # ==========================================================
-      # 2. INSTALL SYSTEM DEPENDENCIES
-      # ==========================================================
-
+      # ========================================================
+      # INSTALL BUILD DEPENDENCIES
+      # ========================================================
       - name: Install build dependencies
         shell: bash
         run: |
@@ -108,41 +83,9 @@ jobs:
             libssl-dev \
             libboost-all-dev
 
-          echo
-          echo "========================================"
-          echo "Compiler packages"
-          echo "========================================"
-
-          dpkg -l gcc-9
-          dpkg -l g++-9
-
-          echo
-          echo "========================================"
-          echo "Compiler paths"
-          echo "========================================"
-
-          command -v gcc-9
-          command -v g++-9
-
-          echo
-          echo "========================================"
-          echo "GCC 9"
-          echo "========================================"
-
-          gcc-9 --version
-
-          echo
-          echo "========================================"
-          echo "G++ 9"
-          echo "========================================"
-
-          g++-9 --version
-
-
-      # ==========================================================
-      # 3. MAKE GCC 9 DEFAULT
-      # ==========================================================
-
+      # ========================================================
+      # CONFIGURE GCC 9
+      # ========================================================
       - name: Configure GCC 9
         shell: bash
         run: |
@@ -157,57 +100,35 @@ jobs:
           sudo update-alternatives \
             --install /usr/bin/gcov gcov /usr/bin/gcov-9 90
 
-          echo
-          echo "Active GCC:"
           gcc --version
-
-          echo
-          echo "Active G++:"
           g++ --version
+          gcov --version
 
-
-      # ==========================================================
-      # 4. SHOW BUILD ENVIRONMENT
-      # ==========================================================
-
+      # ========================================================
+      # SHOW BUILD ENVIRONMENT
+      # ========================================================
       - name: Show build environment
         shell: bash
         run: |
           set -euxo pipefail
 
-          echo "========================================"
-          echo "Operating System"
-          echo "========================================"
-
           cat /etc/os-release
 
-          echo
-          echo "========================================"
-          echo "Compiler"
-          echo "========================================"
-
+          echo "GCC:"
           gcc --version
+
+          echo "G++:"
           g++ --version
 
-          echo
-          echo "========================================"
-          echo "CMake"
-          echo "========================================"
-
+          echo "CMake:"
           cmake --version
 
-          echo
-          echo "========================================"
-          echo "CPU"
-          echo "========================================"
-
+          echo "CPU:"
           nproc
 
-
-      # ==========================================================
-      # 5. PREPARE SOURCE DIRECTORY
-      # ==========================================================
-
+      # ========================================================
+      # PREPARE SOURCE DIRECTORY
+      # ========================================================
       - name: Prepare source directory
         shell: bash
         run: |
@@ -218,12 +139,10 @@ jobs:
 
           ls -ld /usr/local/src
 
-
-      # ==========================================================
-      # 6. BUILD BOOST
-      # ==========================================================
-
-      - name: Build Boost
+      # ========================================================
+      # BUILD BOOST 1.83
+      # ========================================================
+      - name: Build Boost 1.83
         shell: bash
         run: |
           set -euxo pipefail
@@ -236,9 +155,6 @@ jobs:
           curl -fL \
             -o "boost_${BOOST_VERSION}.tar.bz2" \
             "https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2"
-
-          echo
-          echo "Verifying Boost checksum..."
 
           echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" \
             | sha256sum -c -
@@ -272,11 +188,25 @@ jobs:
 
           sudo ldconfig
 
+      # ========================================================
+      # VERIFY BOOST
+      # ========================================================
+      - name: Verify Boost 1.83
+        shell: bash
+        run: |
+          set -euxo pipefail
 
-      # ==========================================================
-      # 7. BUILD LIBSODIUM
-      # ==========================================================
+          echo "Boost version header:"
+          grep -E '#define BOOST_VERSION' \
+            /usr/include/boost/version.hpp
 
+          echo
+          echo "Boost static libraries:"
+          ls -lh /usr/lib/libboost_*.a 2>/dev/null || true
+
+      # ========================================================
+      # BUILD LIBSODIUM
+      # ========================================================
       - name: Build libsodium
         shell: bash
         run: |
@@ -294,11 +224,7 @@ jobs:
 
           cd libsodium
 
-          echo "Checking libsodium revision..."
-
           test "$(git rev-parse HEAD)" = "${SODIUM_HASH}"
-
-          echo "libsodium revision verified."
 
           ./autogen.sh
 
@@ -328,11 +254,9 @@ jobs:
 
           sudo ldconfig
 
-
-      # ==========================================================
-      # 8. BUILD SQLITE
-      # ==========================================================
-
+      # ========================================================
+      # BUILD SQLITE
+      # ========================================================
       - name: Build SQLite
         shell: bash
         run: |
@@ -346,9 +270,6 @@ jobs:
           curl -fL \
             -o "sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
             "https://sqlite.org/2020/sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
-
-          echo
-          echo "Verifying SQLite checksum..."
 
           echo "${SQLITE_HASH}  sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
             | sha256sum -c -
@@ -368,11 +289,13 @@ jobs:
 
           sudo ldconfig
 
-
-      # ==========================================================
-      # 9. BUILD CURL
-      # ==========================================================
-
+      # ========================================================
+      # BUILD CURL 7.76.1
+      #
+      # HTTPS/SSL is disabled in Beldex, therefore we build
+      # curl without SSL, zlib, zstd, brotli and libpsl.
+      # This avoids static-link dependency problems.
+      # ========================================================
       - name: Build curl
         shell: bash
         run: |
@@ -390,20 +313,6 @@ jobs:
           tar -xf "curl-${CURL_VERSION}.tar.gz"
 
           cd "curl-${CURL_VERSION}"
-
-          # ------------------------------------------------------
-          # Beldex is configured with HTTPS_AND_SSL=OFF.
-          #
-          # Therefore build a minimal static libcurl without:
-          #   - OpenSSL
-          #   - zlib
-          #   - zstd
-          #   - brotli
-          #   - libpsl
-          #
-          # This prevents static libcurl from pulling additional
-          # libraries such as libzstd into the final beldexd link.
-          # ------------------------------------------------------
 
           ./configure \
             --enable-static \
@@ -434,57 +343,35 @@ jobs:
 
           sudo ldconfig
 
-          echo
-          echo "========================================"
-          echo "Installed curl"
-          echo "========================================"
-
           /usr/local/bin/curl --version
-
-          echo
-          echo "========================================"
-          echo "libcurl files"
-          echo "========================================"
 
           ls -lh /usr/local/lib/libcurl.a
           ls -lh /usr/local/include/curl/curl.h
 
-          echo
-          echo "========================================"
-          echo "libcurl dependencies"
-          echo "========================================"
+          PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
+            pkg-config --static --libs libcurl || true
 
-          if command -v pkg-config >/dev/null 2>&1; then
-            PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
-              pkg-config --static --libs libcurl || true
-          fi
-
-
-      # ==========================================================
-      # 10. UPDATE SUBMODULES
-      # ==========================================================
-
+      # ========================================================
+      # UPDATE SUBMODULES
+      # ========================================================
       - name: Update git submodules
         shell: bash
         run: |
           set -euxo pipefail
 
           git submodule sync --recursive
-          git submodule update --init --recursive
 
+          git submodule update \
+            --init \
+            --recursive
 
-      # ==========================================================
-      # 11. APPLY SOURCE COMPATIBILITY FIXES
-      # ==========================================================
-
+      # ========================================================
+      # APPLY SOURCE COMPATIBILITY FIXES
+      # ========================================================
       - name: Apply source compatibility fixes
         shell: bash
         run: |
           set -euxo pipefail
-
-          # ------------------------------------------------------
-          # loki-mq / oxenc compatibility
-          # ------------------------------------------------------
 
           sed -i \
             's/add_library(_oxenmq_external_oxenc INTERFACE IMPORTED)//' \
@@ -498,53 +385,40 @@ jobs:
             's/target_link_libraries(oxenmq PUBLIC _oxenmq_external_oxenc)/target_link_libraries(oxenmq PUBLIC oxenc::oxenc)/' \
             external/loki-mq/CMakeLists.txt
 
-
-          # ------------------------------------------------------
-          # Catch2 is not needed when tests are disabled
-          # ------------------------------------------------------
-
           sed -i \
             's/add_subdirectory(Catch2)/if(BUILD_TESTS)\n  add_subdirectory(Catch2)\nendif()/' \
             external/CMakeLists.txt
 
-
-      # ==========================================================
-      # 12. CHECK CURL LIBRARY
-      # ==========================================================
-
+      # ========================================================
+      # CHECK CURL
+      # ========================================================
       - name: Check curl installation
         shell: bash
         run: |
           set -euxo pipefail
 
-          echo "========================================"
-          echo "Static curl"
-          echo "========================================"
-
           test -f /usr/local/lib/libcurl.a
+          test -d /usr/local/include/curl
 
-          echo "Found:"
           ls -lh /usr/local/lib/libcurl.a
-
-          echo
-          echo "Curl include directory:"
           ls -ld /usr/local/include/curl
 
-          echo
-          echo "Curl pkg-config:"
           PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
             pkg-config --modversion libcurl || true
 
-          echo
-          echo "Static curl libraries:"
           PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
             pkg-config --static --libs libcurl || true
 
-
-      # ==========================================================
-      # 13. CONFIGURE CMAKE
-      # ==========================================================
-
+      # ========================================================
+      # CONFIGURE CMAKE
+      #
+      # IMPORTANT:
+      # Boost_NO_BOOST_CMAKE=ON prevents CMake from using
+      # Ubuntu's Boost 1.74 BoostConfig.cmake.
+      #
+      # This forces CMake to use FindBoost and our Boost 1.83
+      # installation.
+      # ========================================================
       - name: Configure CMake
         shell: bash
         run: |
@@ -557,18 +431,31 @@ jobs:
           cd build/release
 
           echo "========================================"
-          echo "Compiler"
+          echo "Checking Boost installation"
           echo "========================================"
 
-          "${CC}" --version
+          grep -E '#define BOOST_VERSION' \
+            /usr/include/boost/version.hpp
 
           echo
-          "${CXX}" --version
+          echo "Static Boost libraries:"
 
+          ls -lh /usr/lib/libboost_*.a 2>/dev/null || true
 
           echo
           echo "========================================"
-          echo "CMake configuration"
+          echo "Checking curl installation"
+          echo "========================================"
+
+          test -f /usr/local/lib/libcurl.a
+          test -d /usr/local/include/curl
+
+          ls -lh /usr/local/lib/libcurl.a
+          ls -ld /usr/local/include/curl
+
+          echo
+          echo "========================================"
+          echo "Configuring CMake"
           echo "========================================"
 
           cmake \
@@ -579,56 +466,53 @@ jobs:
             -DARCH=x86-64 \
             -DHTTPS_AND_SSL=OFF \
             -DBUILD_TESTS=OFF \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DBoost_USE_STATIC_LIBS=ON \
+            -DBoost_USE_STATIC_RUNTIME=ON \
+            -DBOOST_ROOT=/usr \
+            -DBoost_NO_SYSTEM_PATHS=OFF \
             -DCMAKE_PREFIX_PATH="/usr/local;/usr" \
             -DCURL_INCLUDE_DIR="/usr/local/include" \
             -DCURL_LIBRARY="/usr/local/lib/libcurl.a" \
-            -DCMAKE_LIBRARY_PATH="/usr/local/lib;/usr/lib/x86_64-linux-gnu" \
+            -DCMAKE_LIBRARY_PATH="/usr/local/lib;/usr/lib" \
             ../..
 
-
-      # ==========================================================
-      # 14. VERIFY CMAKE CURL SELECTION
-      # ==========================================================
-
+      # ========================================================
+      # VERIFY CMAKE DEPENDENCIES
+      # ========================================================
       - name: Verify CMake dependencies
         shell: bash
         run: |
           set -euxo pipefail
 
+          cd build/release
+
           echo "========================================"
-          echo "CMake cache - CURL"
+          echo "Boost configuration"
           echo "========================================"
 
-          grep -Ei \
-            'CURL|curl' \
-            CMakeCache.txt \
-            || true
+          grep -Ei 'Boost|boost' CMakeCache.txt || true
 
           echo
           echo "========================================"
-          echo "Selected curl library"
+          echo "Curl configuration"
           echo "========================================"
 
-          grep -E \
-            '^CURL_LIBRARY:FILEPATH=' \
-            CMakeCache.txt \
-            || true
+          grep -Ei 'CURL|curl' CMakeCache.txt || true
 
           echo
-          echo "========================================"
-          echo "Selected curl include directory"
-          echo "========================================"
+          echo "CURL_LIBRARY:"
+          grep -E '^CURL_LIBRARY:FILEPATH=' \
+            CMakeCache.txt || true
 
-          grep -E \
-            '^CURL_INCLUDE_DIR:PATH=' \
-            CMakeCache.txt \
-            || true
+          echo
+          echo "CURL_INCLUDE_DIR:"
+          grep -E '^CURL_INCLUDE_DIR:PATH=' \
+            CMakeCache.txt || true
 
-
-      # ==========================================================
-      # 15. BUILD BELDEX
-      # ==========================================================
-
+      # ========================================================
+      # BUILD BELDEX
+      # ========================================================
       - name: Build Beldex
         shell: bash
         run: |
@@ -636,15 +520,11 @@ jobs:
 
           cd build/release
 
-          make \
-            -j"$(nproc)" \
-            VERBOSE=1
+          make -j"$(nproc)" VERBOSE=1
 
-
-      # ==========================================================
-      # 16. VERIFY BELDEXD
-      # ==========================================================
-
+      # ========================================================
+      # VERIFY BELDEXD
+      # ========================================================
       - name: Verify beldexd
         shell: bash
         run: |
@@ -653,37 +533,26 @@ jobs:
           test -f build/release/bin/beldexd
 
           echo "========================================"
-          echo "Beldex binary"
+          echo "beldexd"
           echo "========================================"
 
           ls -lh build/release/bin/beldexd
 
           echo
-          echo "========================================"
-          echo "File information"
-          echo "========================================"
-
+          echo "File information:"
           file build/release/bin/beldexd
 
           echo
-          echo "========================================"
-          echo "Dependencies"
-          echo "========================================"
-
+          echo "Dynamic dependencies:"
           ldd build/release/bin/beldexd || true
 
           echo
-          echo "========================================"
-          echo "Version"
-          echo "========================================"
-
+          echo "Version:"
           build/release/bin/beldexd --version || true
 
-
-      # ==========================================================
-      # 17. PREPARE ARTIFACT
-      # ==========================================================
-
+      # ========================================================
+      # PREPARE ARTIFACT
+      # ========================================================
       - name: Prepare artifacts
         shell: bash
         run: |
@@ -695,7 +564,7 @@ jobs:
 
           cp -a build/release/bin/. artifacts/
 
-          echo "Artifact contents:"
+          echo "Artifacts:"
           ls -lah artifacts/
 
           tar -czf \
@@ -703,14 +572,12 @@ jobs:
             -C artifacts .
 
           echo
-          echo "Archive:"
+          echo "Final archive:"
           ls -lh beldex-daemon-linux-x86_64.tar.gz
 
-
-      # ==========================================================
-      # 18. UPLOAD ARTIFACT
-      # ==========================================================
-
+      # ========================================================
+      # UPLOAD GITHUB ARTIFACT
+      # ========================================================
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -721,51 +588,46 @@ jobs:
           retention-days: 30
 
 
-  # ==============================================================
-  # DEPLOY
-  # ==============================================================
-
+  # ============================================================
+  # DEPLOY JOB
+  # ============================================================
   deploy:
     name: Upload binary to server
 
     needs:
       - build
 
-    if: >
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     runs-on: ubuntu-22.04
 
     steps:
 
-      # ==========================================================
-      # 19. DOWNLOAD ARTIFACT
-      # ==========================================================
-
+      # ========================================================
+      # DOWNLOAD BUILD ARTIFACT
+      # ========================================================
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: beldex-daemon-linux-x86_64
           path: ./artifact
 
-
-      # ==========================================================
-      # 20. SHOW ARTIFACT
-      # ==========================================================
-
+      # ========================================================
+      # SHOW DOWNLOADED ARTIFACT
+      # ========================================================
       - name: Show downloaded artifact
         shell: bash
         run: |
           set -euxo pipefail
 
-          find ./artifact -maxdepth 3 -type f -ls
+          find ./artifact \
+            -maxdepth 3 \
+            -type f \
+            -ls
 
-
-      # ==========================================================
-      # 21. CONFIGURE SSH
-      # ==========================================================
-
+      # ========================================================
+      # CONFIGURE SSH
+      # ========================================================
       - name: Configure SSH
         shell: bash
         env:
@@ -777,7 +639,9 @@ jobs:
 
           mkdir -p ~/.ssh
 
-          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/id_rsa
+          printf '%s\n' \
+            "$SERVER_SSH_KEY" \
+            > ~/.ssh/id_rsa
 
           chmod 600 ~/.ssh/id_rsa
 
@@ -788,11 +652,9 @@ jobs:
 
           chmod 644 ~/.ssh/known_hosts
 
-
-      # ==========================================================
-      # 22. UPLOAD BINARY
-      # ==========================================================
-
+      # ========================================================
+      # UPLOAD BINARY TO SERVER
+      # ========================================================
       - name: Upload binary
         shell: bash
         env:
@@ -808,11 +670,9 @@ jobs:
             ./artifact/beldex-daemon-linux-x86_64.tar.gz \
             "${SERVER_USER}@${SERVER_HOST}:${DEPLOY_PATH}/"
 
-
-      # ==========================================================
-      # 23. VERIFY UPLOAD
-      # ==========================================================
-
+      # ========================================================
+      # VERIFY UPLOAD
+      # ========================================================
       - name: Verify upload
         shell: bash
         env:
