@@ -14,9 +14,12 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ============================================================
+  # BUILD
+  # ============================================================
   build:
     name: Build Beldex Daemon
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-24.04
 
     env:
       BOOST_VERSION: 1_83_0
@@ -29,102 +32,94 @@ jobs:
       SQLITE_VERSION: 3310100
       SQLITE_HASH: 62284efebc05a76f909c580ffa5c008a7d22a1287285d68b7825a2b6b51949ae
 
+      CURL_VERSION: 7.76.1
+
+      CC: gcc-9
+      CXX: g++-9
+
     steps:
 
-      # ---------------------------------------------------------
-      # 1. Checkout source code
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 1. Checkout
+      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-      # ---------------------------------------------------------
-      # 2. Install build dependencies
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 2. Show runner information
+      # --------------------------------------------------------
+      - name: Show environment
+        run: |
+          set -eux
+
+          echo "Operating system:"
+          cat /etc/os-release
+
+          echo
+          echo "Compiler:"
+          gcc-9 --version
+          g++-9 --version
+
+          echo
+          echo "CMake:"
+          cmake --version
+
+      # --------------------------------------------------------
+      # 3. Install dependencies
+      # --------------------------------------------------------
       - name: Install build dependencies
         run: |
-          set -ex
+          set -eux
 
           sudo apt-get update
 
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            curl \
-            apt-transport-https \
-            eatmydata \
             bash \
+            build-essential \
             ca-certificates \
+            curl \
+            wget \
+            git \
             cmake \
-            g++ \
-            make \
             pkg-config \
+            make \
+            gcc-9 \
+            g++-9 \
             graphviz \
             doxygen \
-            git \
             libtool-bin \
             autoconf \
             automake \
             bzip2 \
             xsltproc \
             gperf \
-            wget \
-            software-properties-common \
             libsystemd-dev
 
-      # ---------------------------------------------------------
-      # 3. Install GCC 7/8/9
-      # ---------------------------------------------------------
-      - name: Install GCC versions
-        run: |
-          set -ex
+          gcc-9 --version
+          g++-9 --version
 
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
-
-          sudo apt-get update
-
-          sudo apt-get install -y \
-            gcc-7 \
-            g++-7 \
-            gcc-8 \
-            g++-8 \
-            gcc-9 \
-            g++-9
-
-          sudo update-alternatives --install \
-            /usr/bin/gcc gcc /usr/bin/gcc-9 90 \
-            --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
-            --slave /usr/bin/gcov gcov /usr/bin/gcov-9
-
-          sudo update-alternatives --install \
-            /usr/bin/gcc gcc /usr/bin/gcc-8 80 \
-            --slave /usr/bin/g++ g++ /usr/bin/g++-8 \
-            --slave /usr/bin/gcov gcov /usr/bin/gcov-8
-
-          sudo update-alternatives --install \
-            /usr/bin/gcc gcc /usr/bin/gcc-7 70 \
-            --slave /usr/bin/g++ g++ /usr/bin/g++-7 \
-            --slave /usr/bin/gcov gcov /usr/bin/gcov-7
-
-          gcc --version
-          g++ --version
-
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 4. Build Boost 1.83.0
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Build Boost
         run: |
-          set -ex
-
-          cd /usr/local/src
+          set -eux
 
           sudo mkdir -p /usr/local/src
           sudo chown -R "$USER:$USER" /usr/local/src
 
-          curl -L -O \
+          cd /usr/local/src
+
+          curl -L -o boost_${BOOST_VERSION}.tar.bz2 \
             https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2
 
-          tar xf boost_${BOOST_VERSION}.tar.bz2
+          echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" \
+            | sha256sum -c
+
+          tar -xf boost_${BOOST_VERSION}.tar.bz2
 
           cd boost_${BOOST_VERSION}
 
@@ -148,22 +143,25 @@ jobs:
             threading=multi \
             threadapi=pthread \
             cxxflags=-fPIC \
-            -j$(nproc) \
+            -j"$(nproc)" \
             install
 
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 5. Build libsodium
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Build libsodium
         run: |
-          set -ex
+          set -eux
 
           cd /usr/local/src
 
+          rm -rf libsodium
+
           git clone \
+            --depth=1 \
+            --branch "${SODIUM_VERSION}" \
             https://github.com/jedisct1/libsodium.git \
-            -b ${SODIUM_VERSION} \
-            --depth=1
+            libsodium
 
           cd libsodium
 
@@ -171,43 +169,43 @@ jobs:
 
           ./autogen.sh
 
-          cp $(find /usr/share -name config.guess | head -n 1) \
-            build-aux/config.guess
+          CONFIG_GUESS=$(find /usr/share -name config.guess | head -n 1)
+          CONFIG_SUB=$(find /usr/share -name config.sub | head -n 1)
 
-          cp $(find /usr/share -name config.sub | head -n 1) \
-            build-aux/config.sub
+          cp "${CONFIG_GUESS}" build-aux/config.guess
+          cp "${CONFIG_SUB}" build-aux/config.sub
 
           chmod +x \
-            build-aux/config.sub \
-            build-aux/config.guess
+            build-aux/config.guess \
+            build-aux/config.sub
 
           ./configure \
             --enable-static \
             --disable-shared \
             --prefix=/usr
 
-          make -j$(nproc)
+          make -j"$(nproc)"
 
           make check
 
           sudo make install
 
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 6. Build SQLite
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Build SQLite
         run: |
-          set -ex
+          set -eux
 
           cd /usr/local/src
 
-          curl -s -O \
+          curl -L -o sqlite-autoconf-${SQLITE_VERSION}.tar.gz \
             https://sqlite.org/2020/sqlite-autoconf-${SQLITE_VERSION}.tar.gz
 
           echo "${SQLITE_HASH}  sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
             | sha256sum -c
 
-          tar xf sqlite-autoconf-${SQLITE_VERSION}.tar.gz
+          tar -xf sqlite-autoconf-${SQLITE_VERSION}.tar.gz
 
           cd sqlite-autoconf-${SQLITE_VERSION}
 
@@ -216,48 +214,53 @@ jobs:
             --prefix=/usr \
             --with-pic
 
-          make -j$(nproc)
+          make -j"$(nproc)"
 
           sudo make install
 
-      # ---------------------------------------------------------
-      # 7. Build curl 7.76.1
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 7. Build curl
+      # --------------------------------------------------------
       - name: Build curl
         run: |
-          set -ex
+          set -eux
 
           cd /usr/local/src
 
-          wget https://curl.se/download/curl-7.76.1.tar.gz
+          curl -L -o curl-${CURL_VERSION}.tar.gz \
+            https://curl.se/download/curl-${CURL_VERSION}.tar.gz
 
-          tar xf curl-7.76.1.tar.gz
+          tar -xf curl-${CURL_VERSION}.tar.gz
 
-          cd curl-7.76.1
+          cd curl-${CURL_VERSION}
 
           ./configure \
             --enable-static \
-            --prefix=/usr
+            --disable-shared \
+            --prefix=/usr/local
 
-          make -j$(nproc)
+          make -j"$(nproc)"
 
           sudo make install
 
-      # ---------------------------------------------------------
+          sudo ldconfig
+
+      # --------------------------------------------------------
       # 8. Update submodules
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Update git submodules
         run: |
-          set -ex
+          set -eux
 
+          git submodule sync --recursive
           git submodule update --init --recursive
 
-      # ---------------------------------------------------------
-      # 9. Apply Dockerfile CMake fixes
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 9. Apply source compatibility fixes
+      # --------------------------------------------------------
       - name: Apply source compatibility fixes
         run: |
-          set -ex
+          set -eux
 
           sed -i \
             's/add_library(_oxenmq_external_oxenc INTERFACE IMPORTED)//' \
@@ -275,12 +278,12 @@ jobs:
             's/add_subdirectory(Catch2)/if(BUILD_TESTS)\n  add_subdirectory(Catch2)\nendif()/' \
             external/CMakeLists.txt
 
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 10. Configure CMake
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Configure CMake
         run: |
-          set -ex
+          set -eux
 
           rm -rf build/release
 
@@ -289,57 +292,70 @@ jobs:
           cd build/release
 
           cmake \
+            -DCMAKE_C_COMPILER="${CC}" \
+            -DCMAKE_CXX_COMPILER="${CXX}" \
             -DSTATIC=ON \
             -DARCH=x86-64 \
             -DHTTPS_AND_SSL=OFF \
             -DCMAKE_BUILD_TYPE=Release \
             ../..
 
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 11. Build Beldex daemon
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Build Beldex
         run: |
-          set -ex
+          set -eux
 
           cd build/release
 
-          make -j$(nproc) VERBOSE=1
+          make -j"$(nproc)" VERBOSE=1
 
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 12. Verify binary
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Verify beldexd
         run: |
-          set -ex
+          set -eux
 
-          ls -lh build/release/bin/
+          echo "Build directory:"
+          ls -lah build/release/bin/
 
+          echo
+          echo "Binary information:"
           file build/release/bin/beldexd
 
+          echo
+          echo "Dynamic dependencies:"
           ldd build/release/bin/beldexd || true
 
+          echo
+          echo "Version:"
           build/release/bin/beldexd --version || true
 
-      # ---------------------------------------------------------
-      # 13. Prepare release binaries
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 13. Prepare artifacts
+      # --------------------------------------------------------
       - name: Prepare artifacts
         run: |
-          set -ex
+          set -eux
+
+          rm -rf artifacts
 
           mkdir -p artifacts
 
           cp -a build/release/bin/. artifacts/
 
-          tar -czf beldex-daemon-linux-x86_64.tar.gz \
+          tar -czf \
+            beldex-daemon-linux-x86_64.tar.gz \
             -C artifacts .
 
+          echo "Artifact:"
           ls -lh beldex-daemon-linux-x86_64.tar.gz
 
-      # ---------------------------------------------------------
-      # 14. Upload binaries to GitHub Actions
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 14. Upload artifact
+      # --------------------------------------------------------
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -349,50 +365,58 @@ jobs:
             artifacts/
           retention-days: 30
 
-  # =============================================================
-  # OPTIONAL DEPLOYMENT JOB
-  # =============================================================
+
+  # ============================================================
+  # DEPLOY
+  # ============================================================
   deploy:
     name: Upload binary to server
-    needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+
+    needs:
+      - build
+
+    if: >
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push'
+
+    runs-on: ubuntu-24.04
 
     steps:
 
-      # ---------------------------------------------------------
-      # 15. Download build artifact
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 15. Download artifact
+      # --------------------------------------------------------
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: beldex-daemon-linux-x86_64
           path: ./artifact
 
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       # 16. Configure SSH
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
       - name: Configure SSH
         env:
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_PORT: ${{ secrets.SERVER_PORT }}
         run: |
-          set -ex
+          set -eux
 
           mkdir -p ~/.ssh
 
-          echo "$SERVER_SSH_KEY" > ~/.ssh/id_rsa
+          printf '%s\n' "$SERVER_SSH_KEY" > ~/.ssh/id_rsa
 
           chmod 600 ~/.ssh/id_rsa
 
           ssh-keyscan \
             -p "${SERVER_PORT}" \
-            "${SERVER_HOST}" >> ~/.ssh/known_hosts
+            "${SERVER_HOST}" \
+            >> ~/.ssh/known_hosts
 
-      # ---------------------------------------------------------
-      # 17. Upload binary to server
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 17. Upload binary
+      # --------------------------------------------------------
       - name: Upload binary
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -400,16 +424,16 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          set -ex
+          set -eux
 
           scp \
             -P "${SERVER_PORT}" \
             ./artifact/beldex-daemon-linux-x86_64.tar.gz \
             "${SERVER_USER}@${SERVER_HOST}:${DEPLOY_PATH}/"
 
-      # ---------------------------------------------------------
-      # 18. Verify uploaded file
-      # ---------------------------------------------------------
+      # --------------------------------------------------------
+      # 18. Verify upload
+      # --------------------------------------------------------
       - name: Verify upload
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -417,9 +441,10 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
+          set -eux
+
           ssh \
             -p "${SERVER_PORT}" \
             "${SERVER_USER}@${SERVER_HOST}" \
             "ls -lh ${DEPLOY_PATH}/beldex-daemon-linux-x86_64.tar.gz"
-
 
