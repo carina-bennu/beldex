@@ -37,7 +37,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT
+      # CHECKOUT SOURCE
       # ========================================================
       - name: Checkout source
         uses: actions/checkout@v4
@@ -80,8 +80,11 @@ jobs:
             libzstd-dev \
             libbrotli-dev \
             libpsl-dev \
-            libssl-dev \
-            libboost-all-dev
+            libssl-dev
+
+          # IMPORTANT:
+          # Do NOT install libboost-all-dev.
+          # Boost 1.83 is built manually below.
 
       # ========================================================
       # CONFIGURE GCC 9
@@ -100,8 +103,13 @@ jobs:
           sudo update-alternatives \
             --install /usr/bin/gcov gcov /usr/bin/gcov-9 90
 
+          echo "GCC:"
           gcc --version
+
+          echo "G++:"
           g++ --version
+
+          echo "GCOV:"
           gcov --version
 
       # ========================================================
@@ -112,18 +120,32 @@ jobs:
         run: |
           set -euxo pipefail
 
+          echo "========================================"
+          echo "Operating System"
+          echo "========================================"
+
           cat /etc/os-release
 
-          echo "GCC:"
-          gcc --version
+          echo
+          echo "========================================"
+          echo "Compiler"
+          echo "========================================"
 
-          echo "G++:"
+          gcc --version
           g++ --version
 
-          echo "CMake:"
+          echo
+          echo "========================================"
+          echo "CMake"
+          echo "========================================"
+
           cmake --version
 
-          echo "CPU:"
+          echo
+          echo "========================================"
+          echo "CPU"
+          echo "========================================"
+
           nproc
 
       # ========================================================
@@ -152,18 +174,28 @@ jobs:
           rm -rf "boost_${BOOST_VERSION}"
           rm -f "boost_${BOOST_VERSION}.tar.bz2"
 
+          echo "Downloading Boost ${BOOST_VERSION_DOT}..."
+
           curl -fL \
             -o "boost_${BOOST_VERSION}.tar.bz2" \
             "https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2"
 
+          echo "Checking Boost SHA256..."
+
           echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" \
             | sha256sum -c -
+
+          echo "Extracting Boost..."
 
           tar -xf "boost_${BOOST_VERSION}.tar.bz2"
 
           cd "boost_${BOOST_VERSION}"
 
+          echo "Bootstrapping Boost..."
+
           ./bootstrap.sh
+
+          echo "Building Boost static libraries..."
 
           sudo ./b2 \
             --prefix=/usr \
@@ -189,20 +221,66 @@ jobs:
           sudo ldconfig
 
       # ========================================================
-      # VERIFY BOOST
+      # REMOVE CONFLICTING UBUNTU BOOST STATIC LIBRARIES
+      # ========================================================
+      - name: Remove conflicting Ubuntu Boost libraries
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "Removing Ubuntu Boost static libraries..."
+
+          sudo rm -f /usr/lib/x86_64-linux-gnu/libboost_*.a
+          sudo rm -f /usr/lib/x86_64-linux-gnu/libboost_*.a.*
+
+          sudo ldconfig
+
+          echo
+          echo "Boost static libraries in /usr/lib:"
+          ls -lh /usr/lib/libboost_*.a
+
+          echo
+          echo "Checking for conflicting architecture libraries:"
+
+          ls -lh \
+            /usr/lib/x86_64-linux-gnu/libboost_*.a \
+            2>/dev/null || true
+
+      # ========================================================
+      # VERIFY BOOST 1.83
       # ========================================================
       - name: Verify Boost 1.83
         shell: bash
         run: |
           set -euxo pipefail
 
-          echo "Boost version header:"
+          echo "========================================"
+          echo "Boost header version"
+          echo "========================================"
+
           grep -E '#define BOOST_VERSION' \
             /usr/include/boost/version.hpp
 
           echo
-          echo "Boost static libraries:"
-          ls -lh /usr/lib/libboost_*.a 2>/dev/null || true
+          echo "========================================"
+          echo "Boost static libraries"
+          echo "========================================"
+
+          ls -lh /usr/lib/libboost_*.a
+
+          echo
+          echo "========================================"
+          echo "Checking program_options"
+          echo "========================================"
+
+          test -f /usr/lib/libboost_program_options.a
+
+          ls -lh /usr/lib/libboost_program_options.a
+
+          echo
+          echo "Boost library information:"
+
+          file /usr/lib/libboost_program_options.a
 
       # ========================================================
       # BUILD LIBSODIUM
@@ -291,10 +369,6 @@ jobs:
 
       # ========================================================
       # BUILD CURL 7.76.1
-      #
-      # HTTPS/SSL is disabled in Beldex, therefore we build
-      # curl without SSL, zlib, zstd, brotli and libpsl.
-      # This avoids static-link dependency problems.
       # ========================================================
       - name: Build curl
         shell: bash
@@ -305,6 +379,8 @@ jobs:
 
           rm -rf "curl-${CURL_VERSION}"
           rm -f "curl-${CURL_VERSION}.tar.gz"
+
+          echo "Downloading curl ${CURL_VERSION}..."
 
           curl -fL \
             -o "curl-${CURL_VERSION}.tar.gz" \
@@ -343,16 +419,25 @@ jobs:
 
           sudo ldconfig
 
+          echo
+          echo "curl version:"
           /usr/local/bin/curl --version
 
+          echo
+          echo "Static curl library:"
           ls -lh /usr/local/lib/libcurl.a
+
+          echo
+          echo "curl headers:"
           ls -lh /usr/local/include/curl/curl.h
 
+          echo
+          echo "curl pkg-config:"
           PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
             pkg-config --static --libs libcurl || true
 
       # ========================================================
-      # UPDATE SUBMODULES
+      # UPDATE GIT SUBMODULES
       # ========================================================
       - name: Update git submodules
         shell: bash
@@ -390,7 +475,7 @@ jobs:
             external/CMakeLists.txt
 
       # ========================================================
-      # CHECK CURL
+      # CHECK CURL INSTALLATION
       # ========================================================
       - name: Check curl installation
         shell: bash
@@ -400,9 +485,19 @@ jobs:
           test -f /usr/local/lib/libcurl.a
           test -d /usr/local/include/curl
 
+          echo "Static curl library:"
           ls -lh /usr/local/lib/libcurl.a
+
+          echo
+          echo "curl include directory:"
           ls -ld /usr/local/include/curl
 
+          echo
+          echo "curl version:"
+          /usr/local/bin/curl --version
+
+          echo
+          echo "pkg-config:"
           PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
             pkg-config --modversion libcurl || true
 
@@ -411,13 +506,6 @@ jobs:
 
       # ========================================================
       # CONFIGURE CMAKE
-      #
-      # IMPORTANT:
-      # Boost_NO_BOOST_CMAKE=ON prevents CMake from using
-      # Ubuntu's Boost 1.74 BoostConfig.cmake.
-      #
-      # This forces CMake to use FindBoost and our Boost 1.83
-      # installation.
       # ========================================================
       - name: Configure CMake
         shell: bash
@@ -431,31 +519,42 @@ jobs:
           cd build/release
 
           echo "========================================"
-          echo "Checking Boost installation"
+          echo "Compiler"
+          echo "========================================"
+
+          "${CC}" --version
+          "${CXX}" --version
+
+          echo
+          echo "========================================"
+          echo "Boost"
           echo "========================================"
 
           grep -E '#define BOOST_VERSION' \
             /usr/include/boost/version.hpp
 
-          echo
-          echo "Static Boost libraries:"
+          test -f /usr/lib/libboost_program_options.a
+          test -f /usr/lib/libboost_system.a
+          test -f /usr/lib/libboost_filesystem.a
 
-          ls -lh /usr/lib/libboost_*.a 2>/dev/null || true
+          echo
+          echo "Boost libraries:"
+
+          ls -lh /usr/lib/libboost_*.a
 
           echo
           echo "========================================"
-          echo "Checking curl installation"
+          echo "Curl"
           echo "========================================"
 
           test -f /usr/local/lib/libcurl.a
           test -d /usr/local/include/curl
 
           ls -lh /usr/local/lib/libcurl.a
-          ls -ld /usr/local/include/curl
 
           echo
           echo "========================================"
-          echo "Configuring CMake"
+          echo "CMake configuration"
           echo "========================================"
 
           cmake \
@@ -470,11 +569,14 @@ jobs:
             -DBoost_USE_STATIC_LIBS=ON \
             -DBoost_USE_STATIC_RUNTIME=ON \
             -DBOOST_ROOT=/usr \
-            -DBoost_NO_SYSTEM_PATHS=OFF \
+            -DBOOST_INCLUDEDIR=/usr/include \
+            -DBOOST_LIBRARYDIR=/usr/lib \
+            -DBoost_NO_SYSTEM_PATHS=ON \
             -DCMAKE_PREFIX_PATH="/usr/local;/usr" \
+            -DCMAKE_INCLUDE_PATH="/usr/include;/usr/local/include" \
+            -DCMAKE_LIBRARY_PATH="/usr/lib;/usr/local/lib" \
             -DCURL_INCLUDE_DIR="/usr/local/include" \
             -DCURL_LIBRARY="/usr/local/lib/libcurl.a" \
-            -DCMAKE_LIBRARY_PATH="/usr/local/lib;/usr/lib" \
             ../..
 
       # ========================================================
@@ -488,25 +590,45 @@ jobs:
           cd build/release
 
           echo "========================================"
-          echo "Boost configuration"
+          echo "Boost CMake configuration"
           echo "========================================"
 
-          grep -Ei 'Boost|boost' CMakeCache.txt || true
-
-          echo
-          echo "========================================"
-          echo "Curl configuration"
-          echo "========================================"
-
-          grep -Ei 'CURL|curl' CMakeCache.txt || true
-
-          echo
-          echo "CURL_LIBRARY:"
-          grep -E '^CURL_LIBRARY:FILEPATH=' \
+          grep -Ei 'Boost|boost' \
             CMakeCache.txt || true
 
           echo
-          echo "CURL_INCLUDE_DIR:"
+          echo "========================================"
+          echo "Curl CMake configuration"
+          echo "========================================"
+
+          grep -Ei 'CURL|curl' \
+            CMakeCache.txt || true
+
+          echo
+          echo "========================================"
+          echo "Checking selected Boost libraries"
+          echo "========================================"
+
+          grep -E 'Boost_LIBRARY_DIRS' \
+            CMakeCache.txt || true
+
+          grep -E 'Boost_PROGRAM_OPTIONS_LIBRARY' \
+            CMakeCache.txt || true
+
+          grep -E 'Boost_SYSTEM_LIBRARY' \
+            CMakeCache.txt || true
+
+          grep -E 'Boost_FILESYSTEM_LIBRARY' \
+            CMakeCache.txt || true
+
+          echo
+          echo "========================================"
+          echo "Checking selected curl"
+          echo "========================================"
+
+          grep -E '^CURL_LIBRARY:FILEPATH=' \
+            CMakeCache.txt || true
+
           grep -E '^CURL_INCLUDE_DIR:PATH=' \
             CMakeCache.txt || true
 
@@ -540,18 +662,21 @@ jobs:
 
           echo
           echo "File information:"
+
           file build/release/bin/beldexd
 
           echo
           echo "Dynamic dependencies:"
+
           ldd build/release/bin/beldexd || true
 
           echo
           echo "Version:"
+
           build/release/bin/beldexd --version || true
 
       # ========================================================
-      # PREPARE ARTIFACT
+      # PREPARE ARTIFACTS
       # ========================================================
       - name: Prepare artifacts
         shell: bash
@@ -573,7 +698,9 @@ jobs:
 
           echo
           echo "Final archive:"
-          ls -lh beldex-daemon-linux-x86_64.tar.gz
+
+          ls -lh \
+            beldex-daemon-linux-x86_64.tar.gz
 
       # ========================================================
       # UPLOAD GITHUB ARTIFACT
@@ -653,7 +780,7 @@ jobs:
           chmod 644 ~/.ssh/known_hosts
 
       # ========================================================
-      # UPLOAD BINARY TO SERVER
+      # UPLOAD BINARY
       # ========================================================
       - name: Upload binary
         shell: bash
