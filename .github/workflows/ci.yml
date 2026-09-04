@@ -14,65 +14,104 @@ on:
   workflow_dispatch:
 
 jobs:
+
   # ============================================================
-  # BUILD
+  # BUILD BELDEX DAEMON
   # ============================================================
   build:
     name: Build Beldex Daemon
-    runs-on: ubuntu-24.04
+
+    # Ubuntu 20.04 is retired.
+    # Ubuntu 22.04 is suitable for the older GCC 9 toolchain.
+    runs-on: ubuntu-22.04
 
     env:
+      # --------------------------------------------------------
+      # Compiler
+      # --------------------------------------------------------
+      CC: gcc-9
+      CXX: g++-9
+
+      # --------------------------------------------------------
+      # Boost
+      # --------------------------------------------------------
       BOOST_VERSION: 1_83_0
       BOOST_VERSION_DOT: 1.83.0
       BOOST_HASH: 6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e
 
+      # --------------------------------------------------------
+      # libsodium
+      # --------------------------------------------------------
       SODIUM_VERSION: 1.0.18-RELEASE
       SODIUM_HASH: 940ef42797baa0278df6b7fd9e67c7590f87744b
 
+      # --------------------------------------------------------
+      # SQLite
+      # --------------------------------------------------------
       SQLITE_VERSION: 3310100
       SQLITE_HASH: 62284efebc05a76f909c580ffa5c008a7d22a1287285d68b7825a2b6b51949ae
 
+      # --------------------------------------------------------
+      # curl
+      # --------------------------------------------------------
       CURL_VERSION: 7.76.1
 
-      CC: gcc-9
-      CXX: g++-9
 
     steps:
 
-      # --------------------------------------------------------
-      # 1. Checkout
-      # --------------------------------------------------------
+      # ========================================================
+      # 1. CHECKOUT SOURCE
+      # ========================================================
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
 
-      # --------------------------------------------------------
-      # 2. Show runner information
-      # --------------------------------------------------------
-      - name: Show environment
+
+      # ========================================================
+      # 2. SHOW BUILD ENVIRONMENT
+      # ========================================================
+      - name: Show build environment
         run: |
           set -eux
 
-          echo "Operating system:"
+          echo "========================================"
+          echo "Operating System"
+          echo "========================================"
           cat /etc/os-release
 
           echo
-          echo "Compiler:"
+          echo "========================================"
+          echo "Compiler"
+          echo "========================================"
           gcc-9 --version
           g++-9 --version
 
           echo
-          echo "CMake:"
+          echo "========================================"
+          echo "CMake"
+          echo "========================================"
           cmake --version
 
-      # --------------------------------------------------------
-      # 3. Install dependencies
-      # --------------------------------------------------------
+          echo
+          echo "========================================"
+          echo "CPU"
+          echo "========================================"
+          nproc
+
+
+      # ========================================================
+      # 3. INSTALL BUILD DEPENDENCIES
+      # ========================================================
       - name: Install build dependencies
         run: |
           set -eux
+
+          sudo apt-get update
+
+          # Make sure Ubuntu Universe is enabled.
+          sudo add-apt-repository -y universe
 
           sudo apt-get update
 
@@ -96,34 +135,86 @@ jobs:
             bzip2 \
             xsltproc \
             gperf \
+            software-properties-common \
             libsystemd-dev
 
+          echo
+          echo "Installed compiler:"
           gcc-9 --version
           g++-9 --version
 
-      # --------------------------------------------------------
-      # 4. Build Boost 1.83.0
-      # --------------------------------------------------------
-      - name: Build Boost
+
+      # ========================================================
+      # 4. SET GCC 9 AS DEFAULT COMPILER
+      # ========================================================
+      - name: Configure GCC 9
+        run: |
+          set -eux
+
+          sudo update-alternatives \
+            --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+
+          sudo update-alternatives \
+            --install /usr/bin/g++ g++ /usr/bin/g++-9 90
+
+          sudo update-alternatives \
+            --install /usr/bin/gcov gcov /usr/bin/gcov-9 90
+
+          echo
+          echo "Active GCC:"
+          gcc --version
+
+          echo
+          echo "Active G++:"
+          g++ --version
+
+
+      # ========================================================
+      # 5. PREPARE SOURCE DIRECTORY
+      # ========================================================
+      - name: Prepare source directory
         run: |
           set -eux
 
           sudo mkdir -p /usr/local/src
           sudo chown -R "$USER:$USER" /usr/local/src
 
+          ls -ld /usr/local/src
+
+
+      # ========================================================
+      # 6. BUILD BOOST 1.83.0
+      # ========================================================
+      - name: Build Boost
+        run: |
+          set -eux
+
           cd /usr/local/src
 
-          curl -L -o boost_${BOOST_VERSION}.tar.bz2 \
-            https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2
+          rm -rf "boost_${BOOST_VERSION}"
+          rm -f "boost_${BOOST_VERSION}.tar.bz2"
+
+          curl -L \
+            -o "boost_${BOOST_VERSION}.tar.bz2" \
+            "https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2"
+
+          echo
+          echo "Verifying Boost checksum..."
 
           echo "${BOOST_HASH}  boost_${BOOST_VERSION}.tar.bz2" \
-            | sha256sum -c
+            | sha256sum -c -
 
-          tar -xf boost_${BOOST_VERSION}.tar.bz2
+          tar -xf "boost_${BOOST_VERSION}.tar.bz2"
 
-          cd boost_${BOOST_VERSION}
+          cd "boost_${BOOST_VERSION}"
+
+          echo
+          echo "Bootstrapping Boost..."
 
           ./bootstrap.sh
+
+          echo
+          echo "Building Boost..."
 
           sudo ./b2 \
             --prefix=/usr \
@@ -146,9 +237,12 @@ jobs:
             -j"$(nproc)" \
             install
 
-      # --------------------------------------------------------
-      # 5. Build libsodium
-      # --------------------------------------------------------
+          sudo ldconfig
+
+
+      # ========================================================
+      # 7. BUILD LIBSODIUM
+      # ========================================================
       - name: Build libsodium
         run: |
           set -eux
@@ -165,12 +259,26 @@ jobs:
 
           cd libsodium
 
+          echo
+          echo "Checking libsodium commit..."
+
           test "$(git rev-parse HEAD)" = "${SODIUM_HASH}"
+
+          echo "libsodium commit verified."
+
+          echo
+          echo "Running autogen.sh..."
 
           ./autogen.sh
 
-          CONFIG_GUESS=$(find /usr/share -name config.guess | head -n 1)
-          CONFIG_SUB=$(find /usr/share -name config.sub | head -n 1)
+          echo
+          echo "Updating config.guess/config.sub..."
+
+          CONFIG_GUESS="$(find /usr/share -name config.guess | head -n 1)"
+          CONFIG_SUB="$(find /usr/share -name config.sub | head -n 1)"
+
+          test -n "${CONFIG_GUESS}"
+          test -n "${CONFIG_SUB}"
 
           cp "${CONFIG_GUESS}" build-aux/config.guess
           cp "${CONFIG_SUB}" build-aux/config.sub
@@ -179,75 +287,127 @@ jobs:
             build-aux/config.guess \
             build-aux/config.sub
 
+          echo
+          echo "Configuring libsodium..."
+
           ./configure \
             --enable-static \
             --disable-shared \
             --prefix=/usr
 
+          echo
+          echo "Building libsodium..."
+
           make -j"$(nproc)"
+
+          echo
+          echo "Running libsodium tests..."
 
           make check
 
+          echo
+          echo "Installing libsodium..."
+
           sudo make install
 
-      # --------------------------------------------------------
-      # 6. Build SQLite
-      # --------------------------------------------------------
+          sudo ldconfig
+
+
+      # ========================================================
+      # 8. BUILD SQLITE
+      # ========================================================
       - name: Build SQLite
         run: |
           set -eux
 
           cd /usr/local/src
 
-          curl -L -o sqlite-autoconf-${SQLITE_VERSION}.tar.gz \
-            https://sqlite.org/2020/sqlite-autoconf-${SQLITE_VERSION}.tar.gz
+          rm -f "sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
+          rm -rf "sqlite-autoconf-${SQLITE_VERSION}"
+
+          curl -L \
+            -o "sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
+            "https://sqlite.org/2020/sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
+
+          echo
+          echo "Verifying SQLite checksum..."
 
           echo "${SQLITE_HASH}  sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
-            | sha256sum -c
+            | sha256sum -c -
 
-          tar -xf sqlite-autoconf-${SQLITE_VERSION}.tar.gz
+          tar -xf "sqlite-autoconf-${SQLITE_VERSION}.tar.gz"
 
-          cd sqlite-autoconf-${SQLITE_VERSION}
+          cd "sqlite-autoconf-${SQLITE_VERSION}"
+
+          echo
+          echo "Configuring SQLite..."
 
           ./configure \
             --disable-shared \
             --prefix=/usr \
             --with-pic
 
+          echo
+          echo "Building SQLite..."
+
           make -j"$(nproc)"
+
+          echo
+          echo "Installing SQLite..."
 
           sudo make install
 
-      # --------------------------------------------------------
-      # 7. Build curl
-      # --------------------------------------------------------
+          sudo ldconfig
+
+
+      # ========================================================
+      # 9. BUILD CURL 7.76.1
+      # ========================================================
       - name: Build curl
         run: |
           set -eux
 
           cd /usr/local/src
 
-          curl -L -o curl-${CURL_VERSION}.tar.gz \
-            https://curl.se/download/curl-${CURL_VERSION}.tar.gz
+          rm -f "curl-${CURL_VERSION}.tar.gz"
+          rm -rf "curl-${CURL_VERSION}"
 
-          tar -xf curl-${CURL_VERSION}.tar.gz
+          curl -L \
+            -o "curl-${CURL_VERSION}.tar.gz" \
+            "https://curl.se/download/curl-${CURL_VERSION}.tar.gz"
 
-          cd curl-${CURL_VERSION}
+          tar -xf "curl-${CURL_VERSION}.tar.gz"
+
+          cd "curl-${CURL_VERSION}"
+
+          echo
+          echo "Configuring curl..."
 
           ./configure \
             --enable-static \
             --disable-shared \
             --prefix=/usr/local
 
+          echo
+          echo "Building curl..."
+
           make -j"$(nproc)"
+
+          echo
+          echo "Installing curl..."
 
           sudo make install
 
           sudo ldconfig
 
-      # --------------------------------------------------------
-      # 8. Update submodules
-      # --------------------------------------------------------
+          echo
+          echo "Installed curl:"
+          /usr/local/bin/curl --version || true
+
+
+      # ========================================================
+      # 10. UPDATE SUBMODULES
+      # ========================================================
       - name: Update git submodules
         run: |
           set -eux
@@ -255,12 +415,15 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive
 
-      # --------------------------------------------------------
-      # 9. Apply source compatibility fixes
-      # --------------------------------------------------------
+
+      # ========================================================
+      # 11. APPLY SOURCE COMPATIBILITY FIXES
+      # ========================================================
       - name: Apply source compatibility fixes
         run: |
           set -eux
+
+          echo "Applying loki-mq/oxenc fixes..."
 
           sed -i \
             's/add_library(_oxenmq_external_oxenc INTERFACE IMPORTED)//' \
@@ -274,13 +437,19 @@ jobs:
             's/target_link_libraries(oxenmq PUBLIC _oxenmq_external_oxenc)/target_link_libraries(oxenmq PUBLIC oxenc::oxenc)/' \
             external/loki-mq/CMakeLists.txt
 
+          echo "Applying Catch2 build fix..."
+
           sed -i \
             's/add_subdirectory(Catch2)/if(BUILD_TESTS)\n  add_subdirectory(Catch2)\nendif()/' \
             external/CMakeLists.txt
 
-      # --------------------------------------------------------
-      # 10. Configure CMake
-      # --------------------------------------------------------
+          echo
+          echo "Source compatibility fixes applied."
+
+
+      # ========================================================
+      # 12. CONFIGURE CMAKE
+      # ========================================================
       - name: Configure CMake
         run: |
           set -eux
@@ -291,6 +460,13 @@ jobs:
 
           cd build/release
 
+          echo "Using compiler:"
+          "${CC}" --version
+          "${CXX}" --version
+
+          echo
+          echo "Configuring CMake..."
+
           cmake \
             -DCMAKE_C_COMPILER="${CC}" \
             -DCMAKE_CXX_COMPILER="${CXX}" \
@@ -300,42 +476,61 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             ../..
 
-      # --------------------------------------------------------
-      # 11. Build Beldex daemon
-      # --------------------------------------------------------
+
+      # ========================================================
+      # 13. BUILD BELDEX DAEMON
+      # ========================================================
       - name: Build Beldex
         run: |
           set -eux
 
           cd build/release
 
-          make -j"$(nproc)" VERBOSE=1
+          echo "Starting Beldex build..."
 
-      # --------------------------------------------------------
-      # 12. Verify binary
-      # --------------------------------------------------------
+          make \
+            -j"$(nproc)" \
+            VERBOSE=1
+
+
+      # ========================================================
+      # 14. VERIFY BELDEXD
+      # ========================================================
       - name: Verify beldexd
         run: |
           set -eux
 
-          echo "Build directory:"
+          echo "========================================"
+          echo "Build output"
+          echo "========================================"
+
           ls -lah build/release/bin/
 
           echo
-          echo "Binary information:"
+          echo "========================================"
+          echo "Binary information"
+          echo "========================================"
+
           file build/release/bin/beldexd
 
           echo
-          echo "Dynamic dependencies:"
+          echo "========================================"
+          echo "Dynamic dependencies"
+          echo "========================================"
+
           ldd build/release/bin/beldexd || true
 
           echo
-          echo "Version:"
+          echo "========================================"
+          echo "Beldex version"
+          echo "========================================"
+
           build/release/bin/beldexd --version || true
 
-      # --------------------------------------------------------
-      # 13. Prepare artifacts
-      # --------------------------------------------------------
+
+      # ========================================================
+      # 15. PREPARE ARTIFACT
+      # ========================================================
       - name: Prepare artifacts
         run: |
           set -eux
@@ -346,16 +541,22 @@ jobs:
 
           cp -a build/release/bin/. artifacts/
 
+          echo
+          echo "Artifact contents:"
+          ls -lah artifacts/
+
           tar -czf \
             beldex-daemon-linux-x86_64.tar.gz \
             -C artifacts .
 
-          echo "Artifact:"
+          echo
+          echo "Final archive:"
           ls -lh beldex-daemon-linux-x86_64.tar.gz
 
-      # --------------------------------------------------------
-      # 14. Upload artifact
-      # --------------------------------------------------------
+
+      # ========================================================
+      # 16. UPLOAD BUILD ARTIFACT
+      # ========================================================
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -367,7 +568,7 @@ jobs:
 
 
   # ============================================================
-  # DEPLOY
+  # DEPLOYMENT
   # ============================================================
   deploy:
     name: Upload binary to server
@@ -375,26 +576,39 @@ jobs:
     needs:
       - build
 
+    # Deploy only after a successful build from a push to main.
     if: >
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push'
 
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
 
     steps:
 
-      # --------------------------------------------------------
-      # 15. Download artifact
-      # --------------------------------------------------------
+      # ========================================================
+      # 17. DOWNLOAD BUILD ARTIFACT
+      # ========================================================
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
           name: beldex-daemon-linux-x86_64
           path: ./artifact
 
-      # --------------------------------------------------------
-      # 16. Configure SSH
-      # --------------------------------------------------------
+
+      # ========================================================
+      # 18. SHOW ARTIFACT
+      # ========================================================
+      - name: Show downloaded artifact
+        run: |
+          set -eux
+
+          echo "Downloaded files:"
+          find ./artifact -maxdepth 3 -type f -ls
+
+
+      # ========================================================
+      # 19. CONFIGURE SSH
+      # ========================================================
       - name: Configure SSH
         env:
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
@@ -414,9 +628,12 @@ jobs:
             "${SERVER_HOST}" \
             >> ~/.ssh/known_hosts
 
-      # --------------------------------------------------------
-      # 17. Upload binary
-      # --------------------------------------------------------
+          chmod 644 ~/.ssh/known_hosts
+
+
+      # ========================================================
+      # 20. UPLOAD BINARY
+      # ========================================================
       - name: Upload binary
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
@@ -431,9 +648,10 @@ jobs:
             ./artifact/beldex-daemon-linux-x86_64.tar.gz \
             "${SERVER_USER}@${SERVER_HOST}:${DEPLOY_PATH}/"
 
-      # --------------------------------------------------------
-      # 18. Verify upload
-      # --------------------------------------------------------
+
+      # ========================================================
+      # 21. VERIFY UPLOAD
+      # ========================================================
       - name: Verify upload
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
