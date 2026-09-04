@@ -1,0 +1,426 @@
+```yaml
+name: Beldex Daemon Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+
+  pull_request:
+    branches:
+      - main
+      - master
+
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Beldex Daemon
+    runs-on: ubuntu-20.04
+
+    env:
+      BOOST_VERSION: 1_83_0
+      BOOST_VERSION_DOT: 1.83.0
+      BOOST_HASH: 6478edfe2f3305127cffe8caf73ea0176c53769f4bf1585be237eb30798c3b8e
+
+      SODIUM_VERSION: 1.0.18-RELEASE
+      SODIUM_HASH: 940ef42797baa0278df6b7fd9e67c7590f87744b
+
+      SQLITE_VERSION: 3310100
+      SQLITE_HASH: 62284efebc05a76f909c580ffa5c008a7d22a1287285d68b7825a2b6b51949ae
+
+    steps:
+
+      # ---------------------------------------------------------
+      # 1. Checkout source code
+      # ---------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # ---------------------------------------------------------
+      # 2. Install build dependencies
+      # ---------------------------------------------------------
+      - name: Install build dependencies
+        run: |
+          set -ex
+
+          sudo apt-get update
+
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            curl \
+            apt-transport-https \
+            eatmydata \
+            bash \
+            ca-certificates \
+            cmake \
+            g++ \
+            make \
+            pkg-config \
+            graphviz \
+            doxygen \
+            git \
+            libtool-bin \
+            autoconf \
+            automake \
+            bzip2 \
+            xsltproc \
+            gperf \
+            wget \
+            software-properties-common \
+            libsystemd-dev
+
+      # ---------------------------------------------------------
+      # 3. Install GCC 7/8/9
+      # ---------------------------------------------------------
+      - name: Install GCC versions
+        run: |
+          set -ex
+
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            gcc-7 \
+            g++-7 \
+            gcc-8 \
+            g++-8 \
+            gcc-9 \
+            g++-9
+
+          sudo update-alternatives --install \
+            /usr/bin/gcc gcc /usr/bin/gcc-9 90 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-9 \
+            --slave /usr/bin/gcov gcov /usr/bin/gcov-9
+
+          sudo update-alternatives --install \
+            /usr/bin/gcc gcc /usr/bin/gcc-8 80 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-8 \
+            --slave /usr/bin/gcov gcov /usr/bin/gcov-8
+
+          sudo update-alternatives --install \
+            /usr/bin/gcc gcc /usr/bin/gcc-7 70 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-7 \
+            --slave /usr/bin/gcov gcov /usr/bin/gcov-7
+
+          gcc --version
+          g++ --version
+
+      # ---------------------------------------------------------
+      # 4. Build Boost 1.83.0
+      # ---------------------------------------------------------
+      - name: Build Boost
+        run: |
+          set -ex
+
+          cd /usr/local/src
+
+          sudo mkdir -p /usr/local/src
+          sudo chown -R "$USER:$USER" /usr/local/src
+
+          curl -L -O \
+            https://archives.boost.io/release/${BOOST_VERSION_DOT}/source/boost_${BOOST_VERSION}.tar.bz2
+
+          tar xf boost_${BOOST_VERSION}.tar.bz2
+
+          cd boost_${BOOST_VERSION}
+
+          ./bootstrap.sh
+
+          sudo ./b2 \
+            --prefix=/usr \
+            --build-type=minimal \
+            link=static \
+            runtime-link=static \
+            --with-atomic \
+            --with-chrono \
+            --with-date_time \
+            --with-filesystem \
+            --with-program_options \
+            --with-regex \
+            --with-serialization \
+            --with-system \
+            --with-thread \
+            --with-locale \
+            threading=multi \
+            threadapi=pthread \
+            cxxflags=-fPIC \
+            -j$(nproc) \
+            install
+
+      # ---------------------------------------------------------
+      # 5. Build libsodium
+      # ---------------------------------------------------------
+      - name: Build libsodium
+        run: |
+          set -ex
+
+          cd /usr/local/src
+
+          git clone \
+            https://github.com/jedisct1/libsodium.git \
+            -b ${SODIUM_VERSION} \
+            --depth=1
+
+          cd libsodium
+
+          test "$(git rev-parse HEAD)" = "${SODIUM_HASH}"
+
+          ./autogen.sh
+
+          cp $(find /usr/share -name config.guess | head -n 1) \
+            build-aux/config.guess
+
+          cp $(find /usr/share -name config.sub | head -n 1) \
+            build-aux/config.sub
+
+          chmod +x \
+            build-aux/config.sub \
+            build-aux/config.guess
+
+          ./configure \
+            --enable-static \
+            --disable-shared \
+            --prefix=/usr
+
+          make -j$(nproc)
+
+          make check
+
+          sudo make install
+
+      # ---------------------------------------------------------
+      # 6. Build SQLite
+      # ---------------------------------------------------------
+      - name: Build SQLite
+        run: |
+          set -ex
+
+          cd /usr/local/src
+
+          curl -s -O \
+            https://sqlite.org/2020/sqlite-autoconf-${SQLITE_VERSION}.tar.gz
+
+          echo "${SQLITE_HASH}  sqlite-autoconf-${SQLITE_VERSION}.tar.gz" \
+            | sha256sum -c
+
+          tar xf sqlite-autoconf-${SQLITE_VERSION}.tar.gz
+
+          cd sqlite-autoconf-${SQLITE_VERSION}
+
+          ./configure \
+            --disable-shared \
+            --prefix=/usr \
+            --with-pic
+
+          make -j$(nproc)
+
+          sudo make install
+
+      # ---------------------------------------------------------
+      # 7. Build curl 7.76.1
+      # ---------------------------------------------------------
+      - name: Build curl
+        run: |
+          set -ex
+
+          cd /usr/local/src
+
+          wget https://curl.se/download/curl-7.76.1.tar.gz
+
+          tar xf curl-7.76.1.tar.gz
+
+          cd curl-7.76.1
+
+          ./configure \
+            --enable-static \
+            --prefix=/usr
+
+          make -j$(nproc)
+
+          sudo make install
+
+      # ---------------------------------------------------------
+      # 8. Update submodules
+      # ---------------------------------------------------------
+      - name: Update git submodules
+        run: |
+          set -ex
+
+          git submodule update --init --recursive
+
+      # ---------------------------------------------------------
+      # 9. Apply Dockerfile CMake fixes
+      # ---------------------------------------------------------
+      - name: Apply source compatibility fixes
+        run: |
+          set -ex
+
+          sed -i \
+            's/add_library(_oxenmq_external_oxenc INTERFACE IMPORTED)//' \
+            external/loki-mq/CMakeLists.txt
+
+          sed -i \
+            's/target_link_libraries(_oxenmq_external_oxenc INTERFACE oxenc::oxenc)//' \
+            external/loki-mq/CMakeLists.txt
+
+          sed -i \
+            's/target_link_libraries(oxenmq PUBLIC _oxenmq_external_oxenc)/target_link_libraries(oxenmq PUBLIC oxenc::oxenc)/' \
+            external/loki-mq/CMakeLists.txt
+
+          sed -i \
+            's/add_subdirectory(Catch2)/if(BUILD_TESTS)\n  add_subdirectory(Catch2)\nendif()/' \
+            external/CMakeLists.txt
+
+      # ---------------------------------------------------------
+      # 10. Configure CMake
+      # ---------------------------------------------------------
+      - name: Configure CMake
+        run: |
+          set -ex
+
+          rm -rf build/release
+
+          mkdir -p build/release
+
+          cd build/release
+
+          cmake \
+            -DSTATIC=ON \
+            -DARCH=x86-64 \
+            -DHTTPS_AND_SSL=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            ../..
+
+      # ---------------------------------------------------------
+      # 11. Build Beldex daemon
+      # ---------------------------------------------------------
+      - name: Build Beldex
+        run: |
+          set -ex
+
+          cd build/release
+
+          make -j$(nproc) VERBOSE=1
+
+      # ---------------------------------------------------------
+      # 12. Verify binary
+      # ---------------------------------------------------------
+      - name: Verify beldexd
+        run: |
+          set -ex
+
+          ls -lh build/release/bin/
+
+          file build/release/bin/beldexd
+
+          ldd build/release/bin/beldexd || true
+
+          build/release/bin/beldexd --version || true
+
+      # ---------------------------------------------------------
+      # 13. Prepare release binaries
+      # ---------------------------------------------------------
+      - name: Prepare artifacts
+        run: |
+          set -ex
+
+          mkdir -p artifacts
+
+          cp -a build/release/bin/. artifacts/
+
+          tar -czf beldex-daemon-linux-x86_64.tar.gz \
+            -C artifacts .
+
+          ls -lh beldex-daemon-linux-x86_64.tar.gz
+
+      # ---------------------------------------------------------
+      # 14. Upload binaries to GitHub Actions
+      # ---------------------------------------------------------
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: beldex-daemon-linux-x86_64
+          path: |
+            beldex-daemon-linux-x86_64.tar.gz
+            artifacts/
+          retention-days: 30
+
+  # =============================================================
+  # OPTIONAL DEPLOYMENT JOB
+  # =============================================================
+  deploy:
+    name: Upload binary to server
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ---------------------------------------------------------
+      # 15. Download build artifact
+      # ---------------------------------------------------------
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: beldex-daemon-linux-x86_64
+          path: ./artifact
+
+      # ---------------------------------------------------------
+      # 16. Configure SSH
+      # ---------------------------------------------------------
+      - name: Configure SSH
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+        run: |
+          set -ex
+
+          mkdir -p ~/.ssh
+
+          echo "$SERVER_SSH_KEY" > ~/.ssh/id_rsa
+
+          chmod 600 ~/.ssh/id_rsa
+
+          ssh-keyscan \
+            -p "${SERVER_PORT}" \
+            "${SERVER_HOST}" >> ~/.ssh/known_hosts
+
+      # ---------------------------------------------------------
+      # 17. Upload binary to server
+      # ---------------------------------------------------------
+      - name: Upload binary
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          set -ex
+
+          scp \
+            -P "${SERVER_PORT}" \
+            ./artifact/beldex-daemon-linux-x86_64.tar.gz \
+            "${SERVER_USER}@${SERVER_HOST}:${DEPLOY_PATH}/"
+
+      # ---------------------------------------------------------
+      # 18. Verify uploaded file
+      # ---------------------------------------------------------
+      - name: Verify upload
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          ssh \
+            -p "${SERVER_PORT}" \
+            "${SERVER_USER}@${SERVER_HOST}" \
+            "ls -lh ${DEPLOY_PATH}/beldex-daemon-linux-x86_64.tar.gz"
+
+
